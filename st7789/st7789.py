@@ -13,12 +13,15 @@ class ST7789(Elaboratable):
     NOP          = 0
     INIT_FILE    = "st7789_linit.mem"
 
-    def __init__(self, reset_delay = 1000, reset2_delay = 500000):
+    def __init__(self, reset_delay = 1000, reset2_delay = 500000, vga_sync = 0):
         self.reset          = Signal()
         self.color          = Signal(self.COLOR_BITS)
         self.x              = Signal(self.X_BITS, reset = 0)
         self.y              = Signal(self.Y_BITS, reset = 0)
         self.next_pixel     = Signal()
+        self.hsync          = Signal() # not needed, not used
+        self.vsync          = Signal()
+        self.blank          = Signal()
         self.spi_csn        = Signal()
         self.spi_clk        = Signal()
         self.spi_mosi       = Signal()
@@ -26,6 +29,7 @@ class ST7789(Elaboratable):
         self.spi_resn       = Signal()
         self.reset_delay    = reset_delay
         self.reset2_delay   = reset2_delay
+        self.vga_sync       = vga_sync
 
     # Used for simulation
     def ports(self):
@@ -62,6 +66,26 @@ class ST7789(Elaboratable):
             m.d.sync += reset2.eq(delay2_cnt == 0),
             with m.If(delay2_cnt[-1] == 0):
                 m.d.sync += delay2_cnt.eq(delay2_cnt-1)
+
+        # VGA input usually needs separate clk_pixel clock domain
+        # clk_spi should be about 4x faster tnan clk_pixel
+        # to catch 60Hz refresh rate
+        # **** this code is untested ****
+        R_x_in       = Signal(self.X_BITS)
+        R_y_in       = Signal(self.Y_BITS)
+        S_color      = Signal(self.COLOR_BITS)
+        R_scanline   = Memory(width=self.COLOR_BITS, depth=self.X_SIZE)
+        if(self.vga_sync):
+            with m.If(self.blank == 0):
+                m.d.sync += R_scanline[R_x_in].eq(self.color)
+            m.d.sync += [
+                R_x_in.eq(Mux(self.blank,  0, Mux(R_x_in != self.X_SIZE  , R_x_in+1, R_x_in))),
+                R_y_in.eq(Mux(self.vsync, -1, Mux(R_y_in == self.Y_SIZE-1, R_y_in+1, R_y_in))),
+            ]
+            m.d.comb += S_color.eq(R_scanline[self.x]) # normal
+            #m.d.comb += S_color.eq(0x1234) # debug (blue color)
+        else:
+            m.d.comb += S_color.eq(self.color)
 
         m.d.comb += [
              #self.spi_resn.eq(self.reset), # debug
@@ -133,6 +157,7 @@ class ST7789(Elaboratable):
                             arg.eq(0)
                         ]
                 with m.Else(): # Send pixels and set x, y and next_pixel
+                  with m.If((R_y_in == self.y) | (self.vga_sync == 0)):
                     m.d.sync += [
                         dc.eq(1),
                         byte_toggle.eq(~byte_toggle),
@@ -141,7 +166,7 @@ class ST7789(Elaboratable):
                     ]
                     with m.If(byte_toggle):
                         m.d.sync += [
-                            data.eq(self.color[0:8]),
+                            data.eq(S_color[0:8]),
                             self.next_pixel.eq(1)
                         ]
                         with m.If(self.x == self.X_SIZE - 1):
@@ -153,7 +178,9 @@ class ST7789(Elaboratable):
                         with m.Else():
                             m.d.sync += self.x.eq(self.x + 1)
                     with m.Else():
-                        m.d.sync += data.eq(self.color[8:])
+                        m.d.sync += data.eq(S_color[8:])
+                  with m.Else(): # R_y_in != y
+                      m.d.sync += clken.eq(0)
             with m.Else(): # Shift out byte
                 m.d.sync += self.next_pixel.eq(0)
                 with m.If(index[0] == 0):
