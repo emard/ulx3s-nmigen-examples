@@ -1,13 +1,13 @@
 // ST7789 init lcd_video (display mounted pins down)
 // image normal (no flip)
-// 38 bytes
+// 35 bytes
 // after reset, delay 2^17 us = 131ms before sending commands
 80
 11
 // SWRESET, 0-param, delay 2^17 us = 131us
-01
-80 
-11
+//01
+//80
+//11
 // SLPOUT, 0-param, delay 2^14 us = 16ms
 11
 80
