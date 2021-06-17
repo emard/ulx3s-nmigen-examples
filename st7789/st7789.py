@@ -13,10 +13,11 @@ class ST7789(Elaboratable):
     NOP          = 0
     INIT_FILE    = "st7789_linit.mem"
 
-    def __init__(self, reset_delay):
+    def __init__(self, reset_delay = 1000, reset2_delay = 500000):
+        self.reset          = Signal()
         self.color          = Signal(self.COLOR_BITS)
-        self.x              = Signal(self.X_BITS)
-        self.y              = Signal(self.Y_BITS)
+        self.x              = Signal(self.X_BITS, reset = 0)
+        self.y              = Signal(self.Y_BITS, reset = 0)
         self.next_pixel     = Signal()
         self.spi_csn        = Signal()
         self.spi_clk        = Signal()
@@ -24,12 +25,13 @@ class ST7789(Elaboratable):
         self.spi_dc         = Signal()
         self.spi_resn       = Signal()
         self.reset_delay    = reset_delay
+        self.reset2_delay   = reset2_delay
 
     # Used for simulation
     def ports(self):
         return [self.color, self.x, self.y, self.next_pixel,
                 self.spi_csn, self.spi_clk, self.spi_mosi, self.spi_dc, self.spi_resn]
-        
+
     def elaborate(self, platform):
         m = Module()
 
@@ -42,6 +44,8 @@ class ST7789(Elaboratable):
         init         = Signal(1,  reset = 1)
         num_args     = Signal(5,  reset = 0)
         delay_cnt    = Signal(28, reset = self.reset_delay * clk_mhz)
+        delay2_cnt   = Signal(28, reset = self.reset2_delay * clk_mhz)
+        reset2       = Signal(1,  reset = 0)
         arg          = Signal(6,  reset = 1)
         delay_set    = Signal(1,  reset = 0)
         last_cmd     = Signal(8,  reset = 0)
@@ -51,9 +55,17 @@ class ST7789(Elaboratable):
 
         init_data = readhex(self.INIT_FILE)
         oled_init = Memory(width=8, depth=len(init_data), init = init_data)
-        
+
+        with m.If(self.reset): # external reset
+            m.d.sync += delay2_cnt.eq(self.reset2_delay * clk_mhz)
+        with m.Else(): # second internal reset after external reset
+            m.d.sync += reset2.eq(delay2_cnt == 0),
+            with m.If(delay2_cnt[-1] == 0):
+                m.d.sync += delay2_cnt.eq(delay2_cnt-1)
+
         m.d.comb += [
-             self.spi_resn.eq(resn),
+             #self.spi_resn.eq(self.reset), # debug
+             self.spi_resn.eq(resn), # normal
              self.spi_csn.eq(~clken),
              self.spi_dc.eq(dc),
              self.spi_clk.eq(((index[0] ^ ~self.CLK_PHASE) | ~clken) ^ ~self.CLK_POLARITY),
@@ -61,21 +73,36 @@ class ST7789(Elaboratable):
              next_byte.eq(oled_init[index[4:]])
         ]
 
-        with m.If(delay_cnt[-1] == 0): # Delay
+        with m.If(self.reset | reset2): # external reset or 2nd internal reset
             m.d.sync += [
-                delay_cnt.eq(delay_cnt - 1),
-                resn.eq(1)
+                index        .eq(0),
+                data         .eq(self.NOP),
+                dc           .eq(1),
+                byte_toggle  .eq(0),
+                init         .eq(1),
+                num_args     .eq(0),
+                delay_cnt    .eq(self.reset_delay * clk_mhz),
+                arg          .eq(1),
+                delay_set    .eq(0),
+                last_cmd     .eq(0),
+                resn         .eq(0),
+                clken        .eq(0),
+                self.x       .eq(0),
+                self.y       .eq(0),
             ]
-        with m.If(index[4:] != len(init_data)):
-            m.d.sync += index.eq(index+1)
+        with m.Elif(delay_cnt[-1] == 0): # Delay
+            m.d.sync += delay_cnt.eq(delay_cnt - 1)
+        with m.Elif(index[4:] != len(init_data)):
+            m.d.sync += [
+                resn.eq(1),
+                index.eq(index+1)
+            ]
             with m.If(index[0:4] == 0): # Start of byte
                 with m.If(init): # Still initialization
-                    m.d.sync += [
-                        dc.eq(0),
-                        arg.eq(arg + 1)
-                    ]
+                    m.d.sync += arg.eq(arg + 1)
                     with m.If(arg == 0):
                         m.d.sync += [
+                            dc.eq(0),
                             data.eq(self.NOP),
                             clken.eq(0),
                             last_cmd.eq(next_byte)

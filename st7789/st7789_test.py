@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 
 from nmigen import *
@@ -15,8 +16,13 @@ oled_resource = [
     Resource("oled_csn",  0, Pins("N2", dir="o"), Attrs(IO_TYPE="LVCMOS33", DRIVE="4", PULLMODE="UP")),
 ]
 
+#btn_resource = [
+#    Resource("btn1",      0, Pins("R1", dir="i"), Attrs(IO_TYPE="LVCMOS33", DRIVE="4", PULLMODE="DOWN")),
+#]
+
 class ST7789Test(Elaboratable):
     def elaborate(self, platform):
+        #clk25 = platform.request("clk25")
         led = [platform.request("led", i) for i in range(8)]
 
         # OLED
@@ -26,7 +32,18 @@ class ST7789Test(Elaboratable):
         oled_resn = platform.request("oled_resn")
         oled_csn  = platform.request("oled_csn")
 
-        st7789 = ST7789(150000)
+        # Buttons
+        btn = [
+            platform.request("button_pwr"),
+            platform.request("button_fire", 0),
+            platform.request("button_fire", 1),
+            platform.request("button_up"),
+            platform.request("button_down"),
+            platform.request("button_left"),
+            platform.request("button_right"),
+        ]
+
+        st7789 = ST7789(reset_delay=1000, reset2_delay=500000)
         m = Module()
         m.submodules.st7789 = st7789
        
@@ -43,6 +60,7 @@ class ST7789Test(Elaboratable):
             next_pixel.eq(st7789.next_pixel),
             x.eq(st7789.x),
             y.eq(st7789.y),
+            st7789.reset.eq(btn[1]),
         ]
 
         with m.If(x[4] ^ y[4]):
@@ -50,9 +68,10 @@ class ST7789Test(Elaboratable):
         with m.Else():
             m.d.comb += st7789.color.eq(y[3:8] << 11)
 
-
         m.d.comb += [
-            Cat([i.o for i in led]).eq(st7789.x)
+          led[0].eq(oled_dc),
+          led[1].eq(oled_resn),
+          led[2].eq(btn[1]),
         ]
 
         return m
