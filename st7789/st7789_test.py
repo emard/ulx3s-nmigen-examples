@@ -30,11 +30,11 @@ class ST7789Test(Elaboratable):
 
         # Constants
         pixel_f           = 25000000
-        resolution_x      = 248
+        resolution_x      = 240
         hsync_front_porch = 16
         hsync_pulse_width = 112
-        hsync_back_porch  = 1920
-        resolution_y      = 248
+        hsync_back_porch  = 2000 # long enough for SPI display to follow fps
+        resolution_y      = 240
         vsync_front_porch = 6
         vsync_pulse_width = 8
         vsync_back_porch  = 23
@@ -64,20 +64,19 @@ class ST7789Test(Elaboratable):
         m = Module()
         m.domains.pixel = cd_pixel = ClockDomain("pixel")
         m.domains.sync  = cd_sync  = ClockDomain("sync")
-        m.domains.shift = cd_shift = ClockDomain("shift")
+        m.domains.spi   = cd_spi   = ClockDomain("spi")
         m.submodules.ecp5pll = pll = ECP5PLL()
         pll.register_clkin(clk_in,  platform.default_clk_frequency)
         pll.create_clkout(cd_sync,  platform.default_clk_frequency)
-        #print(pixel_f)
         pll.create_clkout(cd_pixel, pixel_f)
-        pll.create_clkout(cd_shift, pixel_f * 5.0)
+        pll.create_clkout(cd_spi,   pixel_f*4) # min 4x pixel
 
         m.submodules.vga = vga = VGA(
-                resolution_x      = resolution_x,
+                resolution_x      = resolution_x+8, # extend picture for SPI display-vga input
                 hsync_front_porch = hsync_front_porch,
                 hsync_pulse       = hsync_pulse_width,
                 hsync_back_porch  = hsync_back_porch,
-                resolution_y      = resolution_y,
+                resolution_y      = resolution_y+8, # extend picture for SPI display-vga input
                 vsync_front_porch = vsync_front_porch,
                 vsync_pulse       = vsync_pulse_width,
                 vsync_back_porch  = vsync_back_porch,
@@ -119,11 +118,11 @@ class ST7789Test(Elaboratable):
             oled_resn.eq(st7789.spi_resn),
             oled_csn .eq(1),
             next_pixel.eq(st7789.next_pixel),
-            x.eq(st7789.x),
-            y.eq(st7789.y),
+            x.eq(st7789.x), # to generate chequered pattern when vga_sync = 0
+            y.eq(st7789.y), # to generate chequered pattern when vga_sync = 0
         ]
 
-        # chequered pattern from x,y
+        # chequered pattern from x,y when vga_sync = 0
         #with m.If(x[4] ^ y[4]):
         #    m.d.comb += st7789.color.eq(x[3:8] << 6)
         #with m.Else():
