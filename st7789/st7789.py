@@ -80,7 +80,7 @@ class ST7789(Elaboratable):
                 m.d.sync += R_scanline[R_x_in].eq(self.color)
             m.d.sync += [
                 R_x_in.eq(Mux(self.blank,  0, Mux(R_x_in != self.X_SIZE  , R_x_in+1, R_x_in))),
-                R_y_in.eq(Mux(self.vsync, -1, Mux(R_y_in == self.Y_SIZE-1, R_y_in+1, R_y_in))),
+                R_y_in.eq(Mux(self.vsync, -1, Mux(R_x_in == self.X_SIZE-1, R_y_in+1, R_y_in))),
             ]
             m.d.comb += S_color.eq(R_scanline[self.x]) # normal
             #m.d.comb += S_color.eq(0x1234) # debug (blue color)
